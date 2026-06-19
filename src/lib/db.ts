@@ -55,6 +55,27 @@ const SANDBOX_USER_ID = 'sandbox-user-uuid-12345';
 // Fungsi bantuan untuk latensi simulasi
 const delay = (ms = 350) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Mengubah objek Date atau string ISO menjadi format tanggal lokal YYYY-MM-DD
+ */
+export function toLocalDateString(dateInput: string | Date): string {
+  if (!dateInput) return '';
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(date.getTime())) return '';
+  const offset = date.getTimezoneOffset();
+  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+  return localDate.toISOString().split('T')[0];
+}
+
+/**
+ * Mengubah format tanggal lokal YYYY-MM-DD menjadi objek Date di zona waktu lokal
+ */
+export function parseLocalDate(dateStr: string): Date {
+  if (!dateStr) return new Date();
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 async function isUsingSupabase(): Promise<boolean> {
   if (!supabase) return false;
   const { data } = await supabase.auth.getSession();
@@ -357,13 +378,13 @@ export const dbActivities = {
         const latestLog = actLogs[0];
         return {
           ...act,
-          last_done_date: latestLog ? latestLog.done_at.split('T')[0] : (act.created_at ? act.created_at.split('T')[0] : new Date().toISOString().split('T')[0])
+          last_done_date: latestLog ? toLocalDateString(latestLog.done_at) : (act.created_at ? toLocalDateString(act.created_at) : toLocalDateString(new Date()))
         };
       });
 
       // Urutkan berdasarkan yang terlama tidak dilakukan
       return mapped.sort((a, b) => 
-        new Date(a.last_done_date).getTime() - new Date(b.last_done_date).getTime()
+        parseLocalDate(a.last_done_date).getTime() - parseLocalDate(b.last_done_date).getTime()
       );
     } else {
       await delay();
@@ -380,12 +401,12 @@ export const dbActivities = {
         const latestLog = actLogs[0];
         return {
           ...act,
-          last_done_date: latestLog ? latestLog.done_at.split('T')[0] : act.created_at?.split('T')[0] || new Date().toISOString().split('T')[0]
+          last_done_date: latestLog ? toLocalDateString(latestLog.done_at) : (act.created_at ? toLocalDateString(act.created_at) : toLocalDateString(new Date()))
         };
       });
 
       return mapped.sort((a, b) => 
-        new Date(a.last_done_date || '').getTime() - new Date(b.last_done_date || '').getTime()
+        parseLocalDate(a.last_done_date || '').getTime() - parseLocalDate(b.last_done_date || '').getTime()
       );
     }
   },
@@ -417,7 +438,7 @@ export const dbActivities = {
       // Masukkan log awal
       const { error: logErr } = await supabase
         .from('activity_logs')
-        .insert([{ activity_id: data.id, done_at: new Date(initial_done_date).toISOString() }]);
+        .insert([{ activity_id: data.id, done_at: parseLocalDate(initial_done_date).toISOString() }]);
       if (logErr) throw logErr;
 
       return { ...data, last_done_date: initial_done_date };
@@ -549,6 +570,24 @@ export const dbActivities = {
       const local = localStorage.getItem('since_activity_logs');
       return local ? JSON.parse(local) : [];
     }
+  },
+
+  async deleteLog(logId: string): Promise<void> {
+    if (await isUsingSupabase() && supabase) {
+      const { error } = await supabase
+        .from('activity_logs')
+        .delete()
+        .eq('id', logId);
+      if (error) throw error;
+    } else {
+      await delay(100);
+      const local = localStorage.getItem('since_activity_logs');
+      if (local) {
+        const list: ActivityLog[] = JSON.parse(local);
+        const filtered = list.filter((item) => item.id !== logId);
+        localStorage.setItem('since_activity_logs', JSON.stringify(filtered));
+      }
+    }
   }
 };
 
@@ -569,7 +608,7 @@ export const dbGoals = {
       const local = localStorage.getItem('since_goals');
       const list: FutureGoal[] = local ? JSON.parse(local) : [];
       return list.sort((a, b) => 
-        new Date(a.target_date).getTime() - new Date(b.target_date).getTime()
+        parseLocalDate(a.target_date).getTime() - parseLocalDate(b.target_date).getTime()
       );
     }
   },

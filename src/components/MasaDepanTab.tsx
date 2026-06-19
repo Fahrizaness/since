@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { toLocalDateString, parseLocalDate } from '../lib/db';
 import type { FutureGoal, Category } from '../lib/db';
 import { PrivacyWrapper } from './PrivacyWrapper';
-import { Plus, X, Trash2, Calendar, Check, Pencil } from 'lucide-react';
+import { Plus, X, Trash2, Calendar, Check, Pencil, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { isAIConfigured, generateGoalActionPlan } from '../lib/ai';
 
 interface MasaDepanTabProps {
   categories: Category[];
@@ -32,6 +34,27 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
   const [isPrivate, setIsPrivate] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
 
+  // States untuk Rencana Aksi AI
+  const [aiPlans, setAiPlans] = useState<{[goalId: string]: string[]}>((() => {
+    const saved = localStorage.getItem('since_ai_plans');
+    return saved ? JSON.parse(saved) : {};
+  }));
+  const [planLoadingId, setPlanLoadingId] = useState<string | null>(null);
+
+  const handleGeneratePlan = async (goalId: string, goalTitle: string, goalTargetDate: string) => {
+    setPlanLoadingId(goalId);
+    try {
+      const steps = await generateGoalActionPlan(goalTitle, goalTargetDate);
+      const updated = { ...aiPlans, [goalId]: steps };
+      setAiPlans(updated);
+      localStorage.setItem('since_ai_plans', JSON.stringify(updated));
+    } catch (err) {
+      console.error('Gagal membuat rencana aksi AI:', err);
+    } finally {
+      setPlanLoadingId(null);
+    }
+  };
+
   const handleStartEdit = (goal: FutureGoal) => {
     setEditingGoal(goal);
     setTitle(goal.title);
@@ -54,7 +77,7 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
   const getDaysRemaining = (dateStr: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const target = new Date(dateStr);
+    const target = parseLocalDate(dateStr);
     target.setHours(0, 0, 0, 0);
 
     const diffTime = target.getTime() - today.getTime();
@@ -108,7 +131,7 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
   const getGroupedGoals = () => {
     const groups: { [year: string]: FutureGoal[] } = {};
     filteredGoals.forEach((goal) => {
-      const year = new Date(goal.target_date).getFullYear().toString();
+      const year = parseLocalDate(goal.target_date).getFullYear().toString();
       if (!groups[year]) {
         groups[year] = [];
       }
@@ -212,7 +235,7 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
               {groupedGoals[year].map((goal) => {
                 const daysRemaining = getDaysRemaining(goal.target_date);
                 const categoryObj = categories.find((c) => c.id === goal.category_id);
-                const dateFormatted = new Date(goal.target_date).toLocaleDateString('id-ID', {
+                const dateFormatted = parseLocalDate(goal.target_date).toLocaleDateString('id-ID', {
                   month: 'long',
                   day: 'numeric'
                 });
@@ -310,6 +333,115 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
                           <Trash2 size={14} />
                         </button>
                       </div>
+
+                      {/* AREA RENCANA AKSI AI */}
+                      {!goal.status && isAIConfigured() && (
+                        <div style={{ marginTop: '8px' }}>
+                          {planLoadingId === goal.id ? (
+                            <div className="animate-pulse-slow" style={{ 
+                              marginTop: '12px', 
+                              padding: '12px', 
+                              borderRadius: '10px', 
+                              background: 'rgba(124, 77, 255, 0.05)',
+                              border: '1px dashed rgba(124, 77, 255, 0.2)',
+                              fontSize: '0.75rem',
+                              color: 'var(--color-secondary)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px'
+                            }}>
+                              <span className="spinner" style={{ width: '12px', height: '12px', borderWidth: '2px', borderColor: 'var(--color-secondary) transparent' }}></span>
+                              <span>Menyusun rencana aksi AI...</span>
+                            </div>
+                          ) : aiPlans[goal.id] ? (
+                            <div style={{
+                              marginTop: '12px',
+                              padding: '12px',
+                              borderRadius: '10px',
+                              background: 'rgba(124, 77, 255, 0.04)',
+                              border: '1px dashed rgba(124, 77, 255, 0.2)',
+                              animation: 'slideUp var(--transition-fast) forwards'
+                            }}>
+                              <div style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center',
+                                marginBottom: '8px'
+                              }}>
+                                <span style={{ 
+                                  fontSize: '0.75rem', 
+                                  fontWeight: 700, 
+                                  color: 'var(--color-secondary)', 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: '4px' 
+                                }}>
+                                  <Sparkles size={12} style={{ filter: 'drop-shadow(0 0 2px var(--color-secondary))' }} /> Rencana Aksi AI
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleGeneratePlan(goal.id, goal.title, goal.target_date)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: 'var(--text-muted)',
+                                    fontSize: '0.65rem',
+                                    cursor: 'pointer',
+                                    padding: '2px 4px',
+                                    textDecoration: 'underline'
+                                  }}
+                                >
+                                  Regenerasi
+                                </button>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {aiPlans[goal.id].map((step, sIdx) => (
+                                  <div key={sIdx} style={{ 
+                                    display: 'flex', 
+                                    gap: '8px', 
+                                    fontSize: '0.78rem', 
+                                    color: 'var(--text-primary)',
+                                    lineHeight: 1.3
+                                  }}>
+                                    <span style={{ 
+                                      color: 'var(--color-secondary)', 
+                                      fontWeight: 700 
+                                    }}>{sIdx + 1}.</span>
+                                    <span>
+                                      <PrivacyWrapper isPrivate={goal.is_private}>
+                                        {step}
+                                      </PrivacyWrapper>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleGeneratePlan(goal.id, goal.title, goal.target_date)}
+                              className="btn-secondary"
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '4px 10px',
+                                borderRadius: '8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                marginTop: '4px',
+                                border: '1px solid rgba(124, 77, 255, 0.3)',
+                                color: 'var(--color-secondary)',
+                                background: 'rgba(124, 77, 255, 0.05)',
+                                cursor: 'pointer',
+                                transition: 'all var(--transition-fast)'
+                              }}
+                            >
+                              <Sparkles size={10} style={{ color: 'var(--color-secondary)' }} />
+                              Rencana Aksi AI
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -350,7 +482,7 @@ export const MasaDepanTab: React.FC<MasaDepanTabProps> = ({
                   <input 
                     type="date" 
                     className="glass-input" 
-                    min={editingGoal ? undefined : new Date().toISOString().split('T')[0]}
+                    min={editingGoal ? undefined : toLocalDateString(new Date())}
                     value={targetDate}
                     onChange={(e) => setTargetDate(e.target.value)}
                     required 

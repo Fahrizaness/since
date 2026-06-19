@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import type { Counter, Activity, FutureGoal, Category, ActivityLog } from '../lib/db';
 import { PrivacyWrapper } from './PrivacyWrapper';
 import { AlertCircle, Sparkles, RefreshCw, PlusCircle } from 'lucide-react';
+import { isAIConfigured, generateAICoaching } from '../lib/ai';
+import { toLocalDateString, parseLocalDate } from '../lib/db';
 
 interface DashboardProps {
   categories: Category[];
@@ -116,7 +118,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Monitor counters untuk memicu modal milestone
   useEffect(() => {
     const calculateElapsedDays = (startDateStr: string) => {
-      const start = new Date(startDateStr);
+      const start = parseLocalDate(startDateStr);
       start.setHours(0, 0, 0, 0);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -175,7 +177,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const getDaysSince = (dateStr: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const lastDone = new Date(dateStr);
+    const lastDone = parseLocalDate(dateStr);
     lastDone.setHours(0, 0, 0, 0);
     const diffTime = today.getTime() - lastDone.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -190,7 +192,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const getDaysRemaining = (dateStr: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const target = new Date(dateStr);
+    const target = parseLocalDate(dateStr);
     target.setHours(0, 0, 0, 0);
     const diffTime = target.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -251,6 +253,111 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const todayInsight = getSmartNudge();
 
+  // States untuk AI Insights
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [isCacheStale, setIsCacheStale] = useState(false);
+  const [currentSig, setCurrentSig] = useState('');
+
+  const fetchNewAiInsight = async (sig: string) => {
+    setAiLoading(true);
+    try {
+      const todayStr = toLocalDateString(new Date());
+      const cacheKey = `since_ai_insight_${todayStr}_${selectedCategoryId || 'all'}`;
+      const insight = await generateAICoaching(filteredActivities, filteredCounters, filteredGoals);
+      if (insight) {
+        const cleaned = insight.trim();
+        sessionStorage.setItem(cacheKey, JSON.stringify({ insight: cleaned, signature: sig }));
+        setAiInsight(cleaned);
+        setIsCacheStale(false);
+      }
+    } catch (err) {
+      console.warn('Gagal memuat AI Insight:', err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(() => {
+      if (isAIConfigured()) {
+        const todayStr = toLocalDateString(new Date());
+        
+        // Buat signature berdasarkan data terfilter untuk memicu refresh cache jika data berubah
+        const dataSignature = [
+          filteredActivities.map(a => `${a.id}:${a.last_done_date}`).join(','),
+          filteredCounters.map(c => `${c.id}:${c.start_date}`).join(','),
+          filteredGoals.map(g => `${g.id}:${g.target_date}:${g.status}`).join(',')
+        ].join('|');
+
+        // Fungsi hash sederhana untuk memendekkan cache key
+        let hash = 0;
+        for (let i = 0; i < dataSignature.length; i++) {
+          hash = (hash << 5) - hash + dataSignature.charCodeAt(i);
+          hash |= 0;
+        }
+        const sig = Math.abs(hash).toString();
+        
+        if (active) {
+          setCurrentSig(sig);
+        }
+
+        const cacheKey = `since_ai_insight_${todayStr}_${selectedCategoryId || 'all'}`;
+        const cachedRaw = sessionStorage.getItem(cacheKey);
+
+        if (cachedRaw) {
+          try {
+            const { insight, signature } = JSON.parse(cachedRaw);
+            if (active) {
+              setAiInsight(insight);
+              setIsCacheStale(signature !== sig);
+            }
+          } catch {
+            sessionStorage.removeItem(cacheKey);
+            if (active) {
+              setAiLoading(true);
+              generateAICoaching(filteredActivities, filteredCounters, filteredGoals)
+                .then((insight) => {
+                  if (active && insight) {
+                    const cleaned = insight.trim();
+                    sessionStorage.setItem(cacheKey, JSON.stringify({ insight: cleaned, signature: sig }));
+                    setAiInsight(cleaned);
+                    setIsCacheStale(false);
+                  }
+                })
+                .catch((err) => console.warn('Gagal memuat AI Insight:', err))
+                .finally(() => { if (active) setAiLoading(false); });
+            }
+          }
+        } else {
+          if (active) {
+            setAiLoading(true);
+            generateAICoaching(filteredActivities, filteredCounters, filteredGoals)
+              .then((insight) => {
+                if (active && insight) {
+                  const cleaned = insight.trim();
+                  sessionStorage.setItem(cacheKey, JSON.stringify({ insight: cleaned, signature: sig }));
+                  setAiInsight(cleaned);
+                  setIsCacheStale(false);
+                }
+              })
+              .catch((err) => console.warn('Gagal memuat AI Insight:', err))
+              .finally(() => { if (active) setAiLoading(false); });
+          }
+        }
+      } else {
+        setAiInsight(null);
+        setIsCacheStale(false);
+      }
+    }, 0);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [filteredActivities, filteredCounters, filteredGoals, selectedCategoryId]);
+
   // Generate dates for the heatmap (last 12 weeks starting from Sunday)
   const getHeatmapData = () => {
     const today = new Date();
@@ -289,13 +396,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
     // Petakan jumlah log ke masing-masing tanggal
     const logCountsByDate: { [key: string]: number } = {};
     filteredLogs.forEach(log => {
-      const dateStr = log.done_at.split('T')[0];
+      const dateStr = toLocalDateString(log.done_at);
       logCountsByDate[dateStr] = (logCountsByDate[dateStr] || 0) + 1;
     });
 
     // Bangun daftar sel dengan level intensitas
     return dateList.map(date => {
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = toLocalDateString(date);
       const count = logCountsByDate[dateStr] || 0;
       let level = 0;
       if (count === 1) level = 1;
@@ -326,15 +433,90 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </p>
       </div>
 
-      {/* TODAY'S INSIGHT / SMART NUDGE */}
-      <div className="glass-card animate-slide-up" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '6px', borderLeft: '4px solid var(--color-primary)' }}>
-        <h4 style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-          <Sparkles size={14} style={{ color: 'var(--color-primary)' }} /> Today's Insight
-        </h4>
-        <p style={{ fontSize: '0.88rem', fontWeight: 500, lineHeight: 1.4, color: 'var(--text-primary)' }}>
-          {todayInsight}
-        </p>
-      </div>
+      {/* TODAY'S INSIGHT / SMART NUDGE / AI INSIGHT */}
+      {aiLoading ? (
+        <div className="glass-card animate-pulse-slow" style={{ 
+          padding: '16px 20px', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '8px', 
+          borderLeft: '4px solid var(--color-secondary)',
+          background: 'linear-gradient(90deg, rgba(124, 77, 255, 0.05) 0%, rgba(79, 124, 255, 0.05) 100%)',
+          boxShadow: '0 0 15px rgba(124, 77, 255, 0.1)'
+        }}>
+          <h4 style={{ fontSize: '0.8rem', color: 'var(--color-secondary)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+            <Sparkles className="spin-animation" size={14} style={{ color: 'var(--color-secondary)' }} /> Menganalisis Perjalanan Anda...
+          </h4>
+          <div style={{ height: '14px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', width: '90%' }}></div>
+          <div style={{ height: '14px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '4px', width: '60%' }}></div>
+        </div>
+      ) : aiInsight ? (
+        <div className="glass-card animate-slide-up" style={{ 
+          padding: '16px 20px', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          gap: '6px', 
+          borderLeft: '4px solid var(--color-secondary)',
+          background: 'linear-gradient(90deg, rgba(124, 77, 255, 0.08) 0%, rgba(79, 124, 255, 0.04) 100%)',
+          boxShadow: '0 4px 20px rgba(124, 77, 255, 0.12)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: '-20px',
+            right: '-20px',
+            width: '80px',
+            height: '80px',
+            background: 'radial-gradient(circle, rgba(124, 77, 255, 0.15) 0%, transparent 70%)',
+            pointerEvents: 'none'
+          }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+            <h4 style={{ fontSize: '0.8rem', color: 'var(--color-secondary)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+              <Sparkles size={14} style={{ color: 'var(--color-secondary)', filter: 'drop-shadow(0 0 4px var(--color-secondary))' }} /> AI Insight ✨
+            </h4>
+            {isCacheStale && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fetchNewAiInsight(currentSig);
+                }}
+                className="btn-secondary"
+                style={{
+                  fontSize: '0.68rem',
+                  padding: '4px 10px',
+                  borderRadius: '8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  border: '1px solid rgba(124, 77, 255, 0.3)',
+                  color: 'var(--color-secondary)',
+                  background: 'rgba(124, 77, 255, 0.08)',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)',
+                  zIndex: 20
+                }}
+                title="Ada perkembangan progres baru. Klik untuk memperbarui insight."
+              >
+                <RefreshCw size={10} className="spin-hover" />
+                Perbarui Progres ⚡
+              </button>
+            )}
+          </div>
+          <p style={{ fontSize: '0.88rem', fontWeight: 500, lineHeight: 1.4, color: 'var(--text-primary)' }}>
+            {aiInsight}
+          </p>
+        </div>
+      ) : (
+        <div className="glass-card animate-slide-up" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '6px', borderLeft: '4px solid var(--color-primary)' }}>
+          <h4 style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+            <Sparkles size={14} style={{ color: 'var(--color-primary)' }} /> Today's Insight
+          </h4>
+          <p style={{ fontSize: '0.88rem', fontWeight: 500, lineHeight: 1.4, color: 'var(--text-primary)' }}>
+            {todayInsight}
+          </p>
+        </div>
+      )}
 
       {/* FILTER BAR KATEGORI (Hanya tampil jika ada kategori dan tidak kosong secara keseluruhan) */}
       {!isOverallEmpty && (
@@ -421,7 +603,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="heatmap-scroll-container">
                 <div className="heatmap-grid">
                   {heatmapCells.map((cell, idx) => {
-                    const formattedDate = new Date(cell.dateStr).toLocaleDateString('id-ID', {
+                    const formattedDate = parseLocalDate(cell.dateStr).toLocaleDateString('id-ID', {
                       weekday: 'long',
                       year: 'numeric',
                       month: 'long',
@@ -542,7 +724,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </PrivacyWrapper>
                       <span className="spotlight-desc">
                         Target: <PrivacyWrapper isPrivate={spotlightGoal.is_private}>
-                          {new Date(spotlightGoal.target_date).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })}
+                          {parseLocalDate(spotlightGoal.target_date).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })}
                         </PrivacyWrapper>
                       </span>
                       {categoryObj && (

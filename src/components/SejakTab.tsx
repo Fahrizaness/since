@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { Counter, Category } from '../lib/db';
 import { PrivacyWrapper } from './PrivacyWrapper';
 import { Plus, X, Trash2, Calendar, Pencil } from 'lucide-react';
+import { toLocalDateString, parseLocalDate } from '../lib/db';
 
 interface SejakTabProps {
   categories: Category[];
@@ -51,7 +52,7 @@ export const SejakTab: React.FC<SejakTabProps> = ({
 
   // Kalkulasi selisih hari & breakdown
   const calculateElapsed = (dateStr: string) => {
-    const start = new Date(dateStr);
+    const start = parseLocalDate(dateStr);
     start.setHours(0, 0, 0, 0);
     const end = new Date();
     end.setHours(0, 0, 0, 0);
@@ -189,7 +190,7 @@ export const SejakTab: React.FC<SejakTabProps> = ({
         <div className="list-container">
           {filteredCounters.map((counter) => {
             const { totalDays, years, months, days } = calculateElapsed(counter.start_date);
-            const dateFormatted = new Date(counter.start_date).toLocaleDateString('id-ID', {
+            const dateFormatted = parseLocalDate(counter.start_date).toLocaleDateString('id-ID', {
               year: 'numeric',
               month: 'long',
               day: 'numeric'
@@ -295,7 +296,7 @@ export const SejakTab: React.FC<SejakTabProps> = ({
                   <input 
                     type="date" 
                     className="glass-input" 
-                    max={new Date().toISOString().split('T')[0]}
+                    max={toLocalDateString(new Date())}
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                     required 

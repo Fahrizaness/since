@@ -6,6 +6,7 @@ import {
   Settings,
   Tags
 } from 'lucide-react';
+import { Logo } from './Logo';
 
 interface LayoutProps {
   activeTab: string;
@@ -25,20 +26,8 @@ export const Layout: React.FC<LayoutProps> = ({
       {/* HEADER ATAS */}
       <header className="app-header">
         <div className="logo-container">
-          <div 
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#ffffff', fontFamily: 'var(--font-heading)' }}>S</span>
-          </div>
-          <span className="logo-text">Since</span>
+          <Logo size={28} />
+          <span className="logo-text" style={{ fontSize: '1.2rem', fontWeight: 800 }}>Since</span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

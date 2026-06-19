@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Mail, Lock, ShieldAlert } from 'lucide-react';
+import { Logo } from './Logo';
 import type { Session } from '@supabase/supabase-js';
 
 interface AuthProps {
@@ -105,21 +106,9 @@ export const Auth: React.FC<AuthProps> = ({ onAuthSuccess, resolvedTheme }) => {
       {/* HEADER LOGO */}
       <div className="auth-header" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', textAlign: 'center' }}>
         
-        {/* LOGO RESMI: Kotak Membulat Gradasi inisial 'S' */}
-        <div 
-          style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '16px',
-            background: 'linear-gradient(135deg, #4F7CFF 0%, #7C4DFF 100%)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 8px 24px rgba(79, 124, 255, 0.35)',
-            marginBottom: '12px'
-          }}
-        >
-          <span style={{ fontSize: '2.25rem', fontWeight: 800, color: '#ffffff', fontFamily: 'var(--font-heading)' }}>S</span>
+        {/* LOGO RESMI: SVG Gradient Logo */}
+        <div style={{ marginBottom: '16px' }}>
+          <Logo size={64} />
         </div>
 
         <div 

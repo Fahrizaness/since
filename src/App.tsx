@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './lib/supabaseClient';
-import { dbCounters, dbActivities, dbGoals, dbCategories } from './lib/db';
+import { dbCounters, dbActivities, dbGoals, dbCategories, toLocalDateString, parseLocalDate } from './lib/db';
 import type { Counter, Activity, FutureGoal, Category, ActivityLog } from './lib/db';
 import type { Session } from '@supabase/supabase-js';
 import { Auth } from './components/Auth';
@@ -11,6 +11,8 @@ import { TerakhirTab } from './components/TerakhirTab';
 import { MasaDepanTab } from './components/MasaDepanTab';
 import { SettingsModal } from './components/SettingsModal';
 import { KategoriTab } from './components/KategoriTab';
+import confetti from 'canvas-confetti';
+import { RefreshCw } from 'lucide-react';
 
 function App() {
   // Sesi pengguna (dari Supabase)
@@ -50,6 +52,10 @@ function App() {
   const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('dark');
   const [username, setUsername] = useState('Pengguna');
   const [showSettings, setShowSettings] = useState(false);
+
+  // States untuk Migrasi Sandbox ke Cloud
+  const [showMigrationModal, setShowMigrationModal] = useState(false);
+  const [migrating, setMigrating] = useState(false);
 
   // 1. Deteksi sesi autentikasi awal dan pantau perubahan auth
   useEffect(() => {
@@ -194,7 +200,7 @@ function App() {
     const getDaysSince = (dateStr: string) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const lastDone = new Date(dateStr);
+      const lastDone = parseLocalDate(dateStr);
       lastDone.setHours(0, 0, 0, 0);
       const diffTime = today.getTime() - lastDone.getTime();
       return Math.floor(diffTime / (1000 * 60 * 60 * 24));
@@ -256,9 +262,165 @@ function App() {
     }
   };
 
+  // 4.5. Logika Migrasi Data Sandbox (Lokal) ke Cloud (Supabase)
+  const handleMigrateData = async () => {
+    if (!session || !supabase) return;
+    setMigrating(true);
+    try {
+      const userId = session.user.id;
+
+      // 1. Baca Kategori Lokal
+      const localCatsStr = localStorage.getItem('since_categories');
+      const localCats: Category[] = localCatsStr ? JSON.parse(localCatsStr) : [];
+
+      // 2. Baca Momen Lokal (Counters)
+      const localCountersStr = localStorage.getItem('since_counters');
+      const localCounters: Counter[] = localCountersStr ? JSON.parse(localCountersStr) : [];
+
+      // 3. Baca Aktivitas Lokal (Activities)
+      const localActivitiesStr = localStorage.getItem('since_activities');
+      const localActivities: Activity[] = localActivitiesStr ? JSON.parse(localActivitiesStr) : [];
+
+      // 4. Baca Log Aktivitas Lokal (Activity Logs)
+      const localLogsStr = localStorage.getItem('since_activity_logs');
+      const localLogs: ActivityLog[] = localLogsStr ? JSON.parse(localLogsStr) : [];
+
+      // 5. Baca Target Lokal (Goals)
+      const localGoalsStr = localStorage.getItem('since_goals');
+      const localGoals: FutureGoal[] = localGoalsStr ? JSON.parse(localGoalsStr) : [];
+
+      // Migrasi sekuensial
+      // A. Migrasi Kategori
+      if (localCats.length > 0) {
+        const catsToInsert = localCats.map(cat => ({
+          id: cat.id,
+          user_id: userId,
+          name: cat.name,
+          color: cat.color
+        }));
+        const { error } = await supabase.from('categories').insert(catsToInsert);
+        if (error) throw error;
+      }
+
+      // B. Migrasi Momen (Counters)
+      if (localCounters.length > 0) {
+        const countersToInsert = localCounters.map(c => ({
+          id: c.id,
+          user_id: userId,
+          category_id: c.category_id,
+          title: c.title,
+          start_date: c.start_date,
+          emoji: c.emoji,
+          is_private: c.is_private,
+          last_milestone_shown: c.last_milestone_shown
+        }));
+        const { error } = await supabase.from('counters').insert(countersToInsert);
+        if (error) throw error;
+      }
+
+      // C. Migrasi Aktivitas (Activities)
+      if (localActivities.length > 0) {
+        const activitiesToInsert = localActivities.map(a => ({
+          id: a.id,
+          user_id: userId,
+          category_id: a.category_id,
+          title: a.title,
+          emoji: a.emoji,
+          is_private: a.is_private
+        }));
+        const { error } = await supabase.from('activities').insert(activitiesToInsert);
+        if (error) throw error;
+      }
+
+      // D. Migrasi Log Aktivitas
+      if (localLogs.length > 0) {
+        const logsToInsert = localLogs.map(l => ({
+          id: l.id,
+          activity_id: l.activity_id,
+          done_at: l.done_at
+        }));
+        const { error } = await supabase.from('activity_logs').insert(logsToInsert);
+        if (error) throw error;
+      }
+
+      // E. Migrasi Target Masa Depan (Goals)
+      if (localGoals.length > 0) {
+        const goalsToInsert = localGoals.map(g => ({
+          id: g.id,
+          user_id: userId,
+          category_id: g.category_id,
+          title: g.title,
+          target_date: g.target_date,
+          status: g.status,
+          is_private: g.is_private
+        }));
+        const { error } = await supabase.from('future_goals').insert(goalsToInsert);
+        if (error) throw error;
+      }
+
+      // Bersihkan local storage
+      localStorage.removeItem('since_categories');
+      localStorage.removeItem('since_counters');
+      localStorage.removeItem('since_activities');
+      localStorage.removeItem('since_activity_logs');
+      localStorage.removeItem('since_goals');
+      localStorage.removeItem('since_reflections');
+      localStorage.removeItem('since_ai_plans');
+
+      // Pemicu Animasi Konfeti
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ['#4F7CFF', '#7C4DFF', '#10b981', '#ffffff']
+      });
+
+      setShowMigrationModal(false);
+      await fetchAllData();
+    } catch (err) {
+      console.error('Gagal memigrasikan data sandbox:', err);
+      alert('Terjadi kesalahan saat memindahkan data ke cloud: ' + (err as Error).message);
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleSkipMigration = () => {
+    if (window.confirm('Apakah Anda yakin ingin memulai baru? Semua data Sandbox lokal Anda di browser ini akan dibersihkan.')) {
+      localStorage.removeItem('since_categories');
+      localStorage.removeItem('since_counters');
+      localStorage.removeItem('since_activities');
+      localStorage.removeItem('since_activity_logs');
+      localStorage.removeItem('since_goals');
+      localStorage.removeItem('since_reflections');
+      localStorage.removeItem('since_ai_plans');
+      setShowMigrationModal(false);
+    }
+  };
+
   useEffect(() => {
     if (session) {
+      // Cek apakah ada data lokal sandbox untuk dimigrasikan
+      const checkLocalData = () => {
+        const keys = ['since_counters', 'since_activities', 'since_goals', 'since_categories'];
+        for (const key of keys) {
+          const val = localStorage.getItem(key);
+          if (val) {
+            try {
+              const arr = JSON.parse(val);
+              if (Array.isArray(arr) && arr.length > 0) return true;
+            } catch {
+              // Abaikan jika format tidak valid
+            }
+          }
+        }
+        return false;
+      };
+
       const timer = setTimeout(() => {
+        if (checkLocalData()) {
+          setShowMigrationModal(true);
+        }
         fetchAllData();
       }, 0);
       return () => clearTimeout(timer);
@@ -340,6 +502,15 @@ function App() {
       await fetchAllData();
     } catch (err) {
       console.error('Gagal memperbarui aktivitas:', err);
+    }
+  };
+
+  const handleDeleteActivityLog = async (logId: string) => {
+    try {
+      await dbActivities.deleteLog(logId);
+      await fetchAllData();
+    } catch (err) {
+      console.error('Gagal menghapus log aktivitas:', err);
     }
   };
 
@@ -433,21 +604,21 @@ function App() {
         const yearsAgo = template.yearsAgo || 1;
         const pastDate = new Date();
         pastDate.setFullYear(pastDate.getFullYear() - yearsAgo);
-        const pastDateStr = pastDate.toISOString().split('T')[0];
+        const pastDateStr = toLocalDateString(pastDate);
 
         await dbCounters.create(template.title, pastDateStr, template.emoji, categoryId, template.isPrivate);
       } else if (templateType === 'activity') {
         const daysAgo = template.daysAgo || 3;
         const lastDoneDate = new Date();
         lastDoneDate.setDate(lastDoneDate.getDate() - daysAgo);
-        const lastDoneDateStr = lastDoneDate.toISOString().split('T')[0];
+        const lastDoneDateStr = toLocalDateString(lastDoneDate);
 
         await dbActivities.create(template.title, lastDoneDateStr, template.emoji, categoryId, template.isPrivate);
       } else if (templateType === 'goal') {
         const monthsInFuture = template.monthsInFuture || 6;
         const targetDate = new Date();
         targetDate.setMonth(targetDate.getMonth() + monthsInFuture);
-        const targetDateStr = targetDate.toISOString().split('T')[0];
+        const targetDateStr = toLocalDateString(targetDate);
 
         await dbGoals.create(template.title, targetDateStr, categoryId, template.isPrivate);
       }
@@ -595,6 +766,7 @@ function App() {
             onResetActivity={handleResetActivity}
             onDeleteActivity={handleDeleteActivity}
             loading={dataLoading}
+            onDeleteActivityLog={handleDeleteActivityLog}
           />
         );
       case 'masa-depan':
@@ -656,6 +828,88 @@ function App() {
 
         {renderTabContent()}
       </Layout>
+
+      {/* MODAL MIGRASI SANDBOX-KE-CLOUD */}
+      {showMigrationModal && (
+        <div className="modal-overlay" style={{ zIndex: 300 }}>
+          <div className="modal-sheet animate-slide-up" style={{ maxWidth: '440px' }}>
+            <div className="modal-header" style={{ justifyContent: 'center', borderBottom: 'none', paddingBottom: '0' }}>
+              <div 
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '16px',
+                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 8px 24px rgba(79, 124, 255, 0.3)',
+                  marginBottom: '16px'
+                }}
+              >
+                <RefreshCw size={24} className={migrating ? "spin-animation" : ""} style={{ color: '#ffffff' }} />
+              </div>
+            </div>
+            
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'var(--font-heading)' }}>
+                Migrasi Data Sandbox
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Kami mendeteksi data lokal (Sandbox) di browser Anda. Apakah Anda ingin memindahkan data tersebut ke akun cloud Supabase agar tersimpan aman?
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '24px', width: '100%' }}>
+              <button
+                onClick={handleMigrateData}
+                className="btn-primary"
+                style={{
+                  width: '100%',
+                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
+                  boxShadow: '0 4px 12px var(--color-primary-glow)',
+                  height: '46px',
+                  borderRadius: '12px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: 'none',
+                  color: '#ffffff',
+                  cursor: 'pointer'
+                }}
+                disabled={migrating}
+              >
+                {migrating ? (
+                  <span className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></span>
+                ) : (
+                  'Migrasikan Data ke Cloud 🚀'
+                )}
+              </button>
+              
+              <button
+                onClick={handleSkipMigration}
+                className="btn-secondary"
+                style={{
+                  width: '100%',
+                  borderColor: 'var(--color-danger)',
+                  color: 'var(--color-danger)',
+                  background: 'hsla(350, 45%, 65%, 0.05)',
+                  height: '46px',
+                  borderRadius: '12px',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+                disabled={migrating}
+              >
+                Mulai Baru & Hapus Data Lokal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL SETTINGS APLIKASI */}
       <SettingsModal 

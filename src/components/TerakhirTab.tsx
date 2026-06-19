@@ -3,6 +3,7 @@ import { dbActivities } from '../lib/db';
 import type { Activity, Category, ActivityLog } from '../lib/db';
 import { PrivacyWrapper } from './PrivacyWrapper';
 import { Plus, X, Trash2, RefreshCw, Calendar, ChevronDown, ChevronUp, Pencil } from 'lucide-react';
+import { toLocalDateString, parseLocalDate } from '../lib/db';
 
 interface TerakhirTabProps {
   categories: Category[];
@@ -12,6 +13,7 @@ interface TerakhirTabProps {
   onResetActivity: (id: string) => Promise<void>;
   onDeleteActivity: (id: string) => Promise<void>;
   loading: boolean;
+  onDeleteActivityLog: (logId: string) => Promise<void>;
 }
 
 const EMOJI_OPTIONS = ['📞', '🏋️', '🪴', '🧼', '🧹', '💇', '🚗', '🦷', '🧺', '🐾', '🛒', '🩺', '🧉', '💻'];
@@ -23,12 +25,13 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
   onUpdateActivity,
   onResetActivity,
   onDeleteActivity,
-  loading
+  loading,
+  onDeleteActivityLog
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
   const [title, setTitle] = useState('');
-  const [lastDoneDate, setLastDoneDate] = useState(new Date().toISOString().split('T')[0]);
+  const [lastDoneDate, setLastDoneDate] = useState(toLocalDateString(new Date()));
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [formCategoryId, setFormCategoryId] = useState<string>('');
   const [isPrivate, setIsPrivate] = useState(false);
@@ -40,6 +43,22 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+
+  const handleDeleteLog = async (logId: string, activityId: string) => {
+    if (window.confirm('Apakah Anda yakin ingin menghapus log riwayat penyelesaian ini?')) {
+      setLogsLoading(true);
+      try {
+        await onDeleteActivityLog(logId);
+        // Refresh log riwayat setelah penghapusan
+        const freshLogs = await dbActivities.getLogs(activityId);
+        setActivityLogs(freshLogs);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLogsLoading(false);
+      }
+    }
+  };
 
   // Ambil log riwayat saat kartu dilebarkan (expanded)
   useEffect(() => {
@@ -77,7 +96,7 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
   const getFriendlyStatus = (dateStr: string) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const lastDone = new Date(dateStr);
+    const lastDone = parseLocalDate(dateStr);
     lastDone.setHours(0, 0, 0, 0);
 
     const diffTime = today.getTime() - lastDone.getTime();
@@ -125,7 +144,7 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
     setShowModal(false);
     setEditingActivity(null);
     setTitle('');
-    setLastDoneDate(new Date().toISOString().split('T')[0]);
+    setLastDoneDate(toLocalDateString(new Date()));
     setFormCategoryId('');
     setIsPrivate(false);
     setSelectedEmoji('📞');
@@ -237,7 +256,7 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
             const isExpanded = expandedActivityId === activity.id;
             const relativeTimeStr = getFriendlyStatus(activity.last_done_date || '');
             const categoryObj = categories.find((c) => c.id === activity.category_id);
-            const dateFormatted = new Date(activity.last_done_date || '').toLocaleDateString('id-ID', {
+            const dateFormatted = parseLocalDate(activity.last_done_date || '').toLocaleDateString('id-ID', {
               year: 'numeric',
               month: 'short',
               day: 'numeric'
@@ -337,15 +356,37 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
 
                           return (
                             <div key={log.id} className="history-log-item">
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <Calendar size={12} />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <Calendar size={12} />
+                                  <PrivacyWrapper isPrivate={activity.is_private}>
+                                    {logDateStr}
+                                  </PrivacyWrapper>
+                                </span>
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>|</span>
                                 <PrivacyWrapper isPrivate={activity.is_private}>
-                                  {logDateStr}
+                                  {logTimeStr} WIB
                                 </PrivacyWrapper>
-                              </span>
-                              <PrivacyWrapper isPrivate={activity.is_private}>
-                                {logTimeStr} WIB
-                              </PrivacyWrapper>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteLog(log.id, activity.id);
+                                }}
+                                className="btn-icon"
+                                title="Hapus log"
+                                style={{ 
+                                  color: 'var(--color-danger)', 
+                                  padding: '2px', 
+                                  background: 'none', 
+                                  border: 'none', 
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           );
                         })}
@@ -391,7 +432,7 @@ export const TerakhirTab: React.FC<TerakhirTabProps> = ({
                     <input 
                       type="date" 
                       className="glass-input" 
-                      max={new Date().toISOString().split('T')[0]}
+                      max={toLocalDateString(new Date())}
                       value={lastDoneDate}
                       onChange={(e) => setLastDoneDate(e.target.value)}
                       required 
