@@ -1,0 +1,46 @@
+{
+  "short_name": "Since",
+  "name": "Since: Jurnal Perjalanan Waktu",
+  "description": "Karena hidup bukan tentang hari ini saja. Tentang berapa lama sejak kemarin, dan berapa jauh menuju masa depan.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "background_color": "#0b0f19",
+  "theme_color": "#8b5cf6",
+  "display": "standalone",
+  "orientation": "portrait",
+  "shortcuts": [
+    {
+      "name": "Tambah Peristiwa",
+      "short_name": "Tambah Peristiwa",
+      "description": "Tambah peristiwa baru sejak dulu",
+      "url": "/?action=add-counter",
+      "icons": [
+        {
+          "src": "icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Catat Kebiasaan",
+      "short_name": "Catat Kebiasaan",
+      "description": "Lihat dan catat kebiasaan harian Anda",
+      "url": "/?tab=terakhir",
+      "icons": [
+        {
+          "src": "icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
+  ]
+}
